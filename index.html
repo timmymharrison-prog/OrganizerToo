@@ -86,8 +86,10 @@
       { id: "month", label: "Month", color: "#ffffff" },
       { id: "year", label: "Year", color: "#a9c8e8" },
       { id: "tasks", label: "Tasks", color: "#c9b6e4" },
+      { id: "folders", label: "Folders", color: "#a9d6c4" },
       { id: "notes", label: "Notes", color: "#f2c6a0" },
     ];
+    const FOLDER_COLORS = ["#e8a7a0", "#f3d98b", "#a9c8e8", "#c9b6e4", "#f2c6a0", "#a9d6c4", "#d3b8a3", "#b6c98a"];
 
     const SEED_EVENTS = {
       "2026-06-06": [{ id: 1, title: "Tina's birthday", emoji: "🎁" }],
@@ -140,11 +142,20 @@
       const [addType, setAddType] = useState("task");
       const [newTime, setNewTime] = useState("");
       const [newDate, setNewDate] = useState("");
+      const [newEndDate, setNewEndDate] = useState("");
+      const [newEndTime, setNewEndTime] = useState("");
       const [notes, setNotes] = useState(() => {
         const loaded = load("organizer_notes", SEED_NOTES);
         return (Array.isArray(loaded) ? loaded : SEED_NOTES).map((n) => (n.html != null ? n : { id: n.id, html: escapeHtml(n.text || "") }));
       });
       useEffect(() => { save("organizer_notes", notes); }, [notes]);
+      const [folders, setFolders] = useState(() => {
+        const v = load("organizer_folders", []);
+        return Array.isArray(v) ? v : [];
+      });
+      useEffect(() => { save("organizer_folders", folders); }, [folders]);
+      const [newFolder, setNewFolder] = useState("");
+      const [openFolder, setOpenFolder] = useState(null);
 
       // watch login state
       useEffect(() => {
@@ -175,8 +186,9 @@
               if (data.events && typeof data.events === "object" && !Array.isArray(data.events)) setEvents(data.events);
               if (Array.isArray(data.tasks)) setTasks(data.tasks);
               if (Array.isArray(data.notes)) setNotes(data.notes);
+              if (Array.isArray(data.folders)) setFolders(data.folders);
             } else {
-              await window.fb.saveData(user.uid, { events, tasks, notes });
+              await window.fb.saveData(user.uid, { events, tasks, notes, folders });
             }
             setCloudLoaded(true);
           } catch (e) { console.error(e); setCloudLoaded(true); }
@@ -188,10 +200,10 @@
       useEffect(() => {
         if (!cloudLoaded || !user || !window.fb) return;
         const t = setTimeout(() => {
-          window.fb.saveData(user.uid, { events, tasks, notes }).catch((e) => console.error(e));
+          window.fb.saveData(user.uid, { events, tasks, notes, folders }).catch((e) => console.error(e));
         }, 800);
         return () => clearTimeout(t);
-      }, [events, tasks, notes, cloudLoaded, user]);
+      }, [events, tasks, notes, folders, cloudLoaded, user]);
       const [noteSel, setNoteSel] = useState({ id: null, text: "" });
       const [flash, setFlash] = useState("");
       const [expandedTask, setExpandedTask] = useState(null);
@@ -244,12 +256,34 @@
         if (!text) return;
         if (addType === "task") {
           const date = newDate || selected;
-          setTasks((p) => [...p, { id: Date.now(), title: text, done: false, date, time: newTime || "" }]);
+          setTasks((p) => [...p, { id: Date.now(), title: text, done: false, date, time: newTime || "", folder: newFolder || "" }]);
         } else {
-          setEvents((p) => ({ ...p, [selected]: [...(p[selected] || []), { id: Date.now(), title: text, emoji: "📌" }] }));
+          const startDate = newDate || selected;
+          const startTime = newTime || "";
+          const endDate = newEndDate || startDate;
+          const endTime = newEndTime || "";
+          setEvents((p) => ({ ...p, [startDate]: [...(p[startDate] || []), { id: Date.now(), title: text, emoji: "📌", startDate, startTime, endDate, endTime, folder: newFolder || "" }] }));
         }
-        setNewItem(""); setNewTime(""); setNewDate("");
+        setNewItem(""); setNewTime(""); setNewDate(""); setNewEndDate(""); setNewEndTime(""); setNewFolder("");
       };
+
+      const addFolder = (name) => {
+        const id = "f" + Date.now();
+        setFolders((p) => [...p, { id, name }]);
+        return id;
+      };
+      const delFolder = (id) => {
+        setFolders((p) => p.filter((f) => f.id !== id));
+        setTasks((p) => p.map((t) => (t.folder === id ? { ...t, folder: "" } : t)));
+        setEvents((p) => {
+          const next = {};
+          for (const k of Object.keys(p)) next[k] = (p[k] || []).map((e) => (e.folder === id ? { ...e, folder: "" } : e));
+          return next;
+        });
+        if (openFolder === id) setOpenFolder(null);
+      };
+      const folderName = (id) => { const f = folders.find((x) => x.id === id); return f ? f.name : ""; };
+      const folderColor = (id) => { const i = folders.findIndex((x) => x.id === id); return FOLDER_COLORS[(i < 0 ? 0 : i) % FOLDER_COLORS.length]; };
 
       const toggleTask = (id) =>
         setTasks((p) => p.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
@@ -258,6 +292,8 @@
       const delTask = (id) => setTasks((p) => p.filter((t) => t.id !== id));
       const delEvent = (k, id) =>
         setEvents((p) => ({ ...p, [k]: (p[k] || []).filter((e) => e.id !== id) }));
+      const updateEvent = (k, id, patch) =>
+        setEvents((p) => ({ ...p, [k]: (p[k] || []).map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
 
       const addNote = () => setNotes((p) => [{ id: Date.now(), html: "" }, ...p]);
       const updateNote = (id, html) => setNotes((p) => p.map((n) => (n.id === id ? { ...n, html } : n)));
@@ -304,6 +340,19 @@
         return `${hh}:${String(m).padStart(2, "0")} ${ampm}`;
       };
       const byTime = (a, b) => (a.time || "99:99").localeCompare(b.time || "99:99");
+
+      const shortDate = (k) => { if (!k) return ""; const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+      const eventTimeLabel = (e) => {
+        const sameDay = !e.endDate || e.endDate === e.startDate;
+        if (sameDay) {
+          if (e.startTime && e.endTime) return `${fmtTime(e.startTime)} – ${fmtTime(e.endTime)}`;
+          if (e.startTime) return fmtTime(e.startTime);
+          return "";
+        }
+        const a = `${shortDate(e.startDate)}${e.startTime ? " " + fmtTime(e.startTime) : ""}`;
+        const b = `${shortDate(e.endDate)}${e.endTime ? " " + fmtTime(e.endTime) : ""}`;
+        return `${a} → ${b}`;
+      };
 
       const selDayCount = tasksFor(selected).length + eventsFor(selected).length;
 
@@ -410,6 +459,10 @@
                                   <input type="time" value={t.time || ""} onChange={(e) => updateTask(t.id, { time: e.target.value })}
                                     className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
                                 </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
+                                  <FolderSelect value={t.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateTask(t.id, { folder: v })} />
+                                </div>
                                 <textarea value={t.details || ""} onChange={(e) => updateTask(t.id, { details: e.target.value })} rows={3}
                                   placeholder="Add notes or comments…"
                                   className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed"
@@ -458,7 +511,7 @@
                               )}
                               {ev.map((e) => (
                                 <div key={e.id} className="ml-8 mb-0.5 text-[11px] truncate px-1.5 py-0.5 rounded inline-block"
-                                  style={{ background: "#dfe6f0", color: "#3a4a63" }}>{e.emoji} {e.title}</div>
+                                  style={{ background: "#dfe6f0", color: "#3a4a63" }}>{e.startTime ? fmtTime(e.startTime) + " " : ""}{e.emoji} {e.title}</div>
                               ))}
                               {[...tk].sort(byTime).map((t) => (
                                 <div key={t.id} className="ml-8 flex items-center gap-1.5 text-[12px] py-0.5">
@@ -515,7 +568,11 @@
                         {ev.map((e) => (
                           <div key={e.id} className="flex items-center gap-2 py-1.5 border-b" style={{ borderColor: "#f0e7d8" }}>
                             <span>{e.emoji}</span>
-                            <span className="flex-1 text-sm" style={{ color: "#3a2420" }}>{e.title}</span>
+                            <div className="flex-1">
+                              <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
+                              {eventTimeLabel(e) && <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{eventTimeLabel(e)}</div>}
+                            </div>
+                            <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(selected, e.id, { folder: v })} />
                             <button onClick={() => delEvent(selected, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
                           </div>
                         ))}
@@ -525,18 +582,47 @@
                           {tk.length > 0 && <span className="text-[11px] font-normal" style={{ color: "#b89a93" }}>{done}/{tk.length} done</span>}
                         </h2>
                         {tk.length === 0 && <p className="text-xs italic" style={{ color: "#c9b8af" }}>No tasks.</p>}
-                        {[...tk].sort(byTime).map((t) => (
-                          <div key={t.id} className="flex items-center gap-2 py-1.5 border-b" style={{ borderColor: "#f0e7d8" }}>
-                            <button onClick={() => toggleTask(t.id)}
-                              className="w-4 h-4 rounded-sm border flex items-center justify-center text-[10px] shrink-0"
-                              style={{ borderColor: "#7c2d24", color: "#fff", background: t.done ? "#7c2d24" : "transparent" }}>
-                              {t.done ? "✓" : ""}
-                            </button>
-                            {t.time && <span className="text-[12px] tabular-nums shrink-0" style={{ color: "#7c2d24", fontWeight: 600 }}>{fmtTime(t.time)}</span>}
-                            <span className="flex-1 text-sm" style={{ color: "#3a2420", textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.5 : 1 }}>{t.title}</span>
-                            <button onClick={() => delTask(t.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
-                          </div>
-                        ))}
+                        {[...tk].sort(byTime).map((t) => {
+                          const open = expandedTask === t.id;
+                          return (
+                            <div key={t.id} className="border-b" style={{ borderColor: "#f0e7d8" }}>
+                              <div className="flex items-center gap-2 py-1.5">
+                                <button onClick={() => toggleTask(t.id)}
+                                  className="w-4 h-4 rounded-sm border flex items-center justify-center text-[10px] shrink-0"
+                                  style={{ borderColor: "#7c2d24", color: "#fff", background: t.done ? "#7c2d24" : "transparent" }}>
+                                  {t.done ? "✓" : ""}
+                                </button>
+                                {t.time && <span className="text-[12px] tabular-nums shrink-0" style={{ color: "#7c2d24", fontWeight: 600 }}>{fmtTime(t.time)}</span>}
+                                <span className="flex-1 text-sm cursor-pointer" onClick={() => setExpandedTask(open ? null : t.id)}
+                                  style={{ color: "#3a2420", textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.5 : 1 }}>
+                                  {t.title}{t.details ? " ✎" : ""}
+                                </span>
+                                <span onClick={() => setExpandedTask(open ? null : t.id)} className="cursor-pointer text-xs shrink-0 select-none" style={{ color: "#c4b3aa" }}>{open ? "▾" : "▸"}</span>
+                                <button onClick={() => delTask(t.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none shrink-0">×</button>
+                              </div>
+                              {open && (
+                                <div className="pl-6 pb-3 space-y-2">
+                                  {t.note && <div className="text-[11px]" style={{ color: "#b89a93" }}>✦ Created from a note</div>}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>Due</span>
+                                    <input type="date" value={t.date} onChange={(e) => updateTask(t.id, { date: e.target.value })}
+                                      className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="time" value={t.time || ""} onChange={(e) => updateTask(t.id, { time: e.target.value })}
+                                      className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
+                                    <FolderSelect value={t.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateTask(t.id, { folder: v })} />
+                                  </div>
+                                  <textarea value={t.details || ""} onChange={(e) => updateTask(t.id, { details: e.target.value })} rows={3}
+                                    placeholder="Add notes or comments…"
+                                    className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed"
+                                    style={{ background: "#fffdf8", border: "1px solid #e5d8c5", color: "#3a2420", fontFamily: "'Newsreader', serif" }} />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
 
                         <div className="flex flex-wrap items-center gap-2 mt-5">
                           <select value={addType} onChange={(e) => setAddType(e.target.value)}
@@ -559,6 +645,31 @@
                               className="text-sm rounded-md px-2 py-1.5 outline-none"
                               style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
                           )}
+                          {addType === "event" && (
+                            <>
+                              <span className="text-[11px]" style={{ color: "#b89a93" }}>Start</span>
+                              <input type="date" value={newDate || selected} onChange={(e) => setNewDate(e.target.value)}
+                                className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                              <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)}
+                                className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                              <span className="text-[11px]" style={{ color: "#b89a93" }}>End</span>
+                              <input type="date" value={newEndDate || newDate || selected} onChange={(e) => setNewEndDate(e.target.value)}
+                                className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                              <input type="time" value={newEndTime} onChange={(e) => setNewEndTime(e.target.value)}
+                                className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                            </>
+                          )}
+                          <select value={newFolder} onChange={(e) => {
+                              if (e.target.value === "__new__") {
+                                const name = window.prompt("New folder name:");
+                                if (name && name.trim()) setNewFolder(addFolder(name.trim()));
+                              } else { setNewFolder(e.target.value); }
+                            }}
+                            className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#f1e8da", color: "#3a2420" }}>
+                            <option value="">No folder</option>
+                            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                            <option value="__new__">+ New folder…</option>
+                          </select>
                           <button onClick={addItem} className="text-sm rounded-md px-3 py-1.5 font-semibold" style={{ background: "#7c2d24", color: "#fff" }}>Add</button>
                         </div>
                       </>
@@ -620,6 +731,90 @@
                       </div>
                     </>
                   )}
+
+                  {/* ===== FOLDERS VIEW ===== */}
+                  {view === "folders" && (() => {
+                    const allEvents = Object.keys(events).flatMap((k) => (Array.isArray(events[k]) ? events[k] : []).map((e) => ({ ...e, _key: k })));
+                    if (openFolder) {
+                      const fTasks = (Array.isArray(tasks) ? tasks : []).filter((t) => t.folder === openFolder).sort((a, b) => a.date.localeCompare(b.date) || byTime(a, b));
+                      const fEvents = allEvents.filter((e) => e.folder === openFolder).sort((a, b) => (a.startDate || "").localeCompare(b.startDate || "") || byTime({ time: a.startTime }, { time: b.startTime }));
+                      return (
+                        <>
+                          <button onClick={() => setOpenFolder(null)} className="text-sm mb-3" style={{ color: "#7c2d24" }}>‹ All folders</button>
+                          <h1 style={{ fontFamily: "'Fraunces', serif", color: "#3a2420", fontWeight: 700 }} className="text-2xl mb-4 flex items-center gap-2">
+                            <span className="inline-block w-3 h-3 rounded-full" style={{ background: folderColor(openFolder) }} />{folderName(openFolder)}
+                          </h1>
+
+                          <h2 style={{ fontFamily: "'Fraunces', serif", color: "#3a2420" }} className="text-sm font-semibold mb-1.5 flex items-center gap-2"><span style={{ color: "#c9a227" }}>●</span> Tasks</h2>
+                          {fTasks.length === 0 && <p className="text-xs italic mb-3" style={{ color: "#c9b8af" }}>No tasks in this folder.</p>}
+                          {fTasks.map((t) => {
+                            const open = expandedTask === t.id;
+                            return (
+                              <div key={t.id} className="border-b" style={{ borderColor: "#f0e7d8" }}>
+                                <div className="flex items-center gap-2 py-1.5">
+                                  <button onClick={() => toggleTask(t.id)} className="w-4 h-4 rounded-sm border flex items-center justify-center text-[10px] shrink-0" style={{ borderColor: "#7c2d24", color: "#fff", background: t.done ? "#7c2d24" : "transparent" }}>{t.done ? "✓" : ""}</button>
+                                  <span className="flex-1 text-sm cursor-pointer" onClick={() => setExpandedTask(open ? null : t.id)} style={{ color: "#3a2420", textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.5 : 1 }}>{t.title}</span>
+                                  <span className="text-[11px] shrink-0" style={{ color: "#b89a93" }}>{shortDate(t.date)}{t.time ? " · " + fmtTime(t.time) : ""}</span>
+                                  <button onClick={() => delTask(t.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none shrink-0">×</button>
+                                </div>
+                                {open && (
+                                  <div className="pl-6 pb-3 space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="text-[11px]" style={{ color: "#b89a93" }}>Due</span>
+                                      <input type="date" value={t.date} onChange={(e) => updateTask(t.id, { date: e.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                      <input type="time" value={t.time || ""} onChange={(e) => updateTask(t.id, { time: e.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
+                                      <FolderSelect value={t.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateTask(t.id, { folder: v })} />
+                                    </div>
+                                    <textarea value={t.details || ""} onChange={(e) => updateTask(t.id, { details: e.target.value })} rows={3} placeholder="Add notes or comments…" className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed" style={{ background: "#fffdf8", border: "1px solid #e5d8c5", color: "#3a2420", fontFamily: "'Newsreader', serif" }} />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+
+                          <h2 style={{ fontFamily: "'Fraunces', serif", color: "#3a2420" }} className="text-sm font-semibold mt-4 mb-1.5 flex items-center gap-2"><span style={{ color: "#5a7bb0" }}>●</span> Events</h2>
+                          {fEvents.length === 0 && <p className="text-xs italic" style={{ color: "#c9b8af" }}>No events in this folder.</p>}
+                          {fEvents.map((e) => (
+                            <div key={e.id} className="flex items-center gap-2 py-1.5 border-b" style={{ borderColor: "#f0e7d8" }}>
+                              <span>{e.emoji}</span>
+                              <div className="flex-1">
+                                <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
+                                <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{shortDate(e.startDate)}{eventTimeLabel(e) ? " · " + eventTimeLabel(e) : ""}</div>
+                              </div>
+                              <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(e._key, e.id, { folder: v })} />
+                              <button onClick={() => delEvent(e._key, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
+                            </div>
+                          ))}
+                        </>
+                      );
+                    }
+                    const countFor = (id) => (Array.isArray(tasks) ? tasks : []).filter((t) => t.folder === id).length + allEvents.filter((e) => e.folder === id).length;
+                    return (
+                      <>
+                        <div className="flex items-center justify-between mb-4">
+                          <h1 style={{ fontFamily: "'Fraunces', serif", color: "#3a2420", fontWeight: 700 }} className="text-2xl">Folders</h1>
+                          <button onClick={() => { const name = window.prompt("New folder name:"); if (name && name.trim()) addFolder(name.trim()); }}
+                            className="text-sm rounded-md px-3 py-1.5 font-semibold" style={{ background: "#7c2d24", color: "#fff" }}>+ New folder</button>
+                        </div>
+                        {folders.length === 0 && <p className="text-sm italic" style={{ color: "#a8978f" }}>No folders yet. Create one, then assign tasks or events to it when adding them.</p>}
+                        <div className="space-y-2">
+                          {folders.map((f) => (
+                            <div key={f.id} className="flex items-center gap-3 rounded-lg p-3" style={{ background: "#fffdf8", border: "1px solid #eee2d2" }}>
+                              <span className="inline-block w-3.5 h-3.5 rounded-full shrink-0" style={{ background: folderColor(f.id) }} />
+                              <button onClick={() => setOpenFolder(f.id)} className="flex-1 text-left">
+                                <div className="text-sm font-semibold" style={{ color: "#3a2420" }}>{f.name}</div>
+                                <div className="text-[11px]" style={{ color: "#b89a93" }}>{countFor(f.id)} item{countFor(f.id) === 1 ? "" : "s"}</div>
+                              </button>
+                              <button onClick={() => { if (window.confirm(`Delete folder "${f.name}"? Items stay, but lose this folder.`)) delFolder(f.id); }} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* ===== NOTES VIEW ===== */}
                   {view === "notes" && (
@@ -734,6 +929,22 @@
             </div>
           </div>
         </div>
+      );
+    }
+
+    function FolderSelect({ value, folders, onChange, onCreate }) {
+      return (
+        <select value={value || ""} onChange={(e) => {
+            if (e.target.value === "__new__") {
+              const name = window.prompt("New folder name:");
+              if (name && name.trim()) onChange(onCreate(name.trim()));
+            } else { onChange(e.target.value); }
+          }}
+          className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#f1e8da", color: "#3a2420" }}>
+          <option value="">No folder</option>
+          {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          <option value="__new__">+ New folder…</option>
+        </select>
       );
     }
 
