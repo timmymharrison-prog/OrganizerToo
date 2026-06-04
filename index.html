@@ -123,8 +123,14 @@
       const [selected, setSelected] = useState(keyOf(today.getFullYear(), today.getMonth(), today.getDate()));
 
       // load saved data if present, otherwise use the samples
-      const [events, setEvents] = useState(() => load("organizer_events", SEED_EVENTS));
-      const [tasks, setTasks] = useState(() => load("organizer_tasks", SEED_TASKS));
+      const [events, setEvents] = useState(() => {
+        const v = load("organizer_events", SEED_EVENTS);
+        return (v && typeof v === "object" && !Array.isArray(v)) ? v : SEED_EVENTS;
+      });
+      const [tasks, setTasks] = useState(() => {
+        const v = load("organizer_tasks", SEED_TASKS);
+        return Array.isArray(v) ? v : SEED_TASKS;
+      });
 
       // save automatically whenever something changes
       useEffect(() => { save("organizer_events", events); }, [events]);
@@ -136,7 +142,7 @@
       const [newDate, setNewDate] = useState("");
       const [notes, setNotes] = useState(() => {
         const loaded = load("organizer_notes", SEED_NOTES);
-        return loaded.map((n) => (n.html != null ? n : { id: n.id, html: escapeHtml(n.text || "") }));
+        return (Array.isArray(loaded) ? loaded : SEED_NOTES).map((n) => (n.html != null ? n : { id: n.id, html: escapeHtml(n.text || "") }));
       });
       useEffect(() => { save("organizer_notes", notes); }, [notes]);
 
@@ -166,9 +172,9 @@
             const data = await window.fb.loadData(user.uid);
             if (cancelled) return;
             if (data) {
-              if (data.events) setEvents(data.events);
-              if (data.tasks) setTasks(data.tasks);
-              if (data.notes) setNotes(data.notes);
+              if (data.events && typeof data.events === "object" && !Array.isArray(data.events)) setEvents(data.events);
+              if (Array.isArray(data.tasks)) setTasks(data.tasks);
+              if (Array.isArray(data.notes)) setNotes(data.notes);
             } else {
               await window.fb.saveData(user.uid, { events, tasks, notes });
             }
@@ -229,8 +235,8 @@
         return `${da.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${db.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
       })();
 
-      const tasksFor = (k) => tasks.filter((t) => t.date === k);
-      const eventsFor = (k) => events[k] || [];
+      const tasksFor = (k) => (Array.isArray(tasks) ? tasks : []).filter((t) => t.date === k);
+      const eventsFor = (k) => (events && events[k]) || [];
       const todayKey = keyOf(today.getFullYear(), today.getMonth(), today.getDate());
 
       const addItem = () => {
