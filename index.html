@@ -241,6 +241,7 @@
       const [noteSel, setNoteSel] = useState({ id: null, text: "" });
       const [flash, setFlash] = useState("");
       const [expandedTask, setExpandedTask] = useState(null);
+      const [expandedEvent, setExpandedEvent] = useState(null);
 
       const firstDow = new Date(cursor.y, cursor.m, 1).getDay();
       const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
@@ -328,6 +329,18 @@
         setEvents((p) => ({ ...p, [k]: (p[k] || []).filter((e) => e.id !== id) }));
       const updateEvent = (k, id, patch) =>
         setEvents((p) => ({ ...p, [k]: (p[k] || []).map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+      const editEvent = (oldKey, id, patch) =>
+        setEvents((p) => {
+          const arr = p[oldKey] || [];
+          const ev = arr.find((e) => e.id === id);
+          if (!ev) return p;
+          const updated = { ...ev, ...patch };
+          const newKey = updated.startDate || oldKey;
+          if (newKey === oldKey) return { ...p, [oldKey]: arr.map((e) => (e.id === id ? updated : e)) };
+          const next = { ...p, [oldKey]: arr.filter((e) => e.id !== id) };
+          next[newKey] = [...(next[newKey] || []), updated];
+          return next;
+        });
 
       const addNote = () => setNotes((p) => [{ id: Date.now(), html: "" }, ...p]);
       const updateNote = (id, html) => setNotes((p) => p.map((n) => (n.id === id ? { ...n, html } : n)));
@@ -616,22 +629,44 @@
                           <span style={{ color: "#5a7bb0" }}>●</span> Events
                         </h2>
                         {ev.length === 0 && <p className="text-xs italic mb-3" style={{ color: "#c9b8af" }}>No events.</p>}
-                        {ev.map((e) => (
-                          <div key={e.id} className="border-b py-1.5" style={{ borderColor: "#f0e7d8" }}>
-                            <div className="flex items-center gap-2">
-                              <span>{e.emoji}</span>
-                              <div className="flex-1">
-                                <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
-                                {eventTimeLabel(e) && <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{eventTimeLabel(e)}</div>}
+                        {ev.map((e) => {
+                          const open = expandedEvent === e.id;
+                          return (
+                            <div key={e.id} className="border-b py-1.5" style={{ borderColor: "#f0e7d8" }}>
+                              <div className="flex items-center gap-2">
+                                <span>{e.emoji}</span>
+                                <div className="flex-1 cursor-pointer" onClick={() => setExpandedEvent(open ? null : e.id)}>
+                                  <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}{e.details ? " ✎" : ""}</div>
+                                  {eventTimeLabel(e) && <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{eventTimeLabel(e)}</div>}
+                                </div>
+                                <span onClick={() => setExpandedEvent(open ? null : e.id)} className="cursor-pointer text-xs shrink-0 select-none" style={{ color: "#c4b3aa" }}>{open ? "▾" : "▸"}</span>
+                                <button onClick={() => delEvent(selected, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none shrink-0">×</button>
                               </div>
-                              <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(selected, e.id, { folder: v })} />
-                              <button onClick={() => delEvent(selected, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
+                              {open && (
+                                <div className="pl-6 pt-2 space-y-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>Start</span>
+                                    <input type="date" value={e.startDate || selected} onChange={(ev2) => editEvent(selected, e.id, { startDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="time" value={e.startTime || ""} onChange={(ev2) => updateEvent(selected, e.id, { startTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>End</span>
+                                    <input type="date" value={e.endDate || e.startDate || selected} onChange={(ev2) => updateEvent(selected, e.id, { endDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="time" value={e.endTime || ""} onChange={(ev2) => updateEvent(selected, e.id, { endTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
+                                    <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(selected, e.id, { folder: v })} />
+                                  </div>
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-[11px] pt-1" style={{ color: "#b89a93" }}>Files</span>
+                                    <div className="flex-1"><Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(selected, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(selected, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} /></div>
+                                  </div>
+                                  <textarea value={e.details || ""} onChange={(ev2) => updateEvent(selected, e.id, { details: ev2.target.value })} rows={3} placeholder="Add notes or details…" className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed" style={{ background: "#fffdf8", border: "1px solid #e5d8c5", color: "#3a2420", fontFamily: "'Newsreader', serif" }} />
+                                  <button onClick={() => setExpandedEvent(null)} className="text-sm rounded-md px-4 py-1.5 font-semibold" style={{ background: "#7c2d24", color: "#fff" }}>Save</button>
+                                </div>
+                              )}
                             </div>
-                            <div className="pl-6 mt-1">
-                              <Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(selected, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(selected, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} />
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
 
                         <h2 style={{ fontFamily: "'Fraunces', serif", color: "#3a2420" }} className="text-sm font-semibold mt-4 mb-1.5 flex items-center gap-2">
                           <span style={{ color: "#c9a227" }}>●</span> To-Do
@@ -841,22 +876,44 @@
 
                           <h2 style={{ fontFamily: "'Fraunces', serif", color: "#3a2420" }} className="text-sm font-semibold mt-4 mb-1.5 flex items-center gap-2"><span style={{ color: "#5a7bb0" }}>●</span> Events</h2>
                           {fEvents.length === 0 && <p className="text-xs italic" style={{ color: "#c9b8af" }}>No events in this folder.</p>}
-                          {fEvents.map((e) => (
+                          {fEvents.map((e) => {
+                            const open = expandedEvent === e.id;
+                            return (
                             <div key={e.id} className="border-b py-1.5" style={{ borderColor: "#f0e7d8" }}>
                               <div className="flex items-center gap-2">
                                 <span>{e.emoji}</span>
-                                <div className="flex-1">
-                                  <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
+                                <div className="flex-1 cursor-pointer" onClick={() => setExpandedEvent(open ? null : e.id)}>
+                                  <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}{e.details ? " ✎" : ""}</div>
                                   <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{shortDate(e.startDate)}{eventTimeLabel(e) ? " · " + eventTimeLabel(e) : ""}</div>
                                 </div>
-                                <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(e._key, e.id, { folder: v })} />
-                                <button onClick={() => delEvent(e._key, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
+                                <span onClick={() => setExpandedEvent(open ? null : e.id)} className="cursor-pointer text-xs shrink-0 select-none" style={{ color: "#c4b3aa" }}>{open ? "▾" : "▸"}</span>
+                                <button onClick={() => delEvent(e._key, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none shrink-0">×</button>
                               </div>
-                              <div className="pl-6 mt-1">
-                                <Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(e._key, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(e._key, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} />
-                              </div>
+                              {open && (
+                                <div className="pl-6 pt-2 space-y-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>Start</span>
+                                    <input type="date" value={e.startDate || ""} onChange={(ev2) => editEvent(e._key, e.id, { startDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="time" value={e.startTime || ""} onChange={(ev2) => updateEvent(e._key, e.id, { startTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>End</span>
+                                    <input type="date" value={e.endDate || e.startDate || ""} onChange={(ev2) => updateEvent(e._key, e.id, { endDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="time" value={e.endTime || ""} onChange={(ev2) => updateEvent(e._key, e.id, { endTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
+                                    <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(e._key, e.id, { folder: v })} />
+                                  </div>
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-[11px] pt-1" style={{ color: "#b89a93" }}>Files</span>
+                                    <div className="flex-1"><Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(e._key, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(e._key, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} /></div>
+                                  </div>
+                                  <textarea value={e.details || ""} onChange={(ev2) => updateEvent(e._key, e.id, { details: ev2.target.value })} rows={3} placeholder="Add notes or details…" className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed" style={{ background: "#fffdf8", border: "1px solid #e5d8c5", color: "#3a2420", fontFamily: "'Newsreader', serif" }} />
+                                  <button onClick={() => setExpandedEvent(null)} className="text-sm rounded-md px-4 py-1.5 font-semibold" style={{ background: "#7c2d24", color: "#fff" }}>Save</button>
+                                </div>
+                              )}
                             </div>
-                          ))}
+                            );
+                          })}
                         </>
                       );
                     }
