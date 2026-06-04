@@ -23,6 +23,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
     import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
     import { getFirestore, initializeFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+    import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-storage.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyC21uDcMLyGso3kLqBYimTL8loUi5zzLjw",
@@ -37,6 +38,7 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
+    const storage = getStorage(app);
 
     window.fb = {
       onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb),
@@ -46,6 +48,14 @@
       loadData: async (uid) => { const snap = await getDoc(doc(db, "users", uid)); return snap.exists() ? snap.data() : null; },
       saveData: (uid, data) => setDoc(doc(db, "users", uid), data),
       subscribe: (uid, cb) => onSnapshot(doc(db, "users", uid), (snap) => cb(snap.exists() ? snap.data() : null)),
+      uploadFile: async (uid, itemId, file) => {
+        const path = `users/${uid}/att/${itemId}/${Date.now()}_${file.name}`;
+        const r = storageRef(storage, path);
+        await uploadBytes(r, file);
+        const url = await getDownloadURL(r);
+        return { name: file.name, url, path };
+      },
+      deleteFile: (path) => deleteObject(storageRef(storage, path)),
     };
     window.dispatchEvent(new Event("fb-ready"));
   </script>
@@ -500,6 +510,10 @@
                                   <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
                                   <FolderSelect value={t.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateTask(t.id, { folder: v })} />
                                 </div>
+                                <div className="flex items-start gap-2">
+                                  <span className="text-[11px] pt-1" style={{ color: "#b89a93" }}>Files</span>
+                                  <div className="flex-1"><Attachments items={t.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, t.id, file); updateTask(t.id, { attachments: [...(t.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateTask(t.id, { attachments: (t.attachments || []).filter((a) => a.path !== att.path) }); }} /></div>
+                                </div>
                                 <textarea value={t.details || ""} onChange={(e) => updateTask(t.id, { details: e.target.value })} rows={3}
                                   placeholder="Add notes or comments…"
                                   className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed"
@@ -603,14 +617,19 @@
                         </h2>
                         {ev.length === 0 && <p className="text-xs italic mb-3" style={{ color: "#c9b8af" }}>No events.</p>}
                         {ev.map((e) => (
-                          <div key={e.id} className="flex items-center gap-2 py-1.5 border-b" style={{ borderColor: "#f0e7d8" }}>
-                            <span>{e.emoji}</span>
-                            <div className="flex-1">
-                              <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
-                              {eventTimeLabel(e) && <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{eventTimeLabel(e)}</div>}
+                          <div key={e.id} className="border-b py-1.5" style={{ borderColor: "#f0e7d8" }}>
+                            <div className="flex items-center gap-2">
+                              <span>{e.emoji}</span>
+                              <div className="flex-1">
+                                <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
+                                {eventTimeLabel(e) && <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{eventTimeLabel(e)}</div>}
+                              </div>
+                              <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(selected, e.id, { folder: v })} />
+                              <button onClick={() => delEvent(selected, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
                             </div>
-                            <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(selected, e.id, { folder: v })} />
-                            <button onClick={() => delEvent(selected, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
+                            <div className="pl-6 mt-1">
+                              <Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(selected, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(selected, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} />
+                            </div>
                           </div>
                         ))}
 
@@ -650,6 +669,10 @@
                                   <div className="flex items-center gap-2">
                                     <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
                                     <FolderSelect value={t.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateTask(t.id, { folder: v })} />
+                                  </div>
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-[11px] pt-1" style={{ color: "#b89a93" }}>Files</span>
+                                    <div className="flex-1"><Attachments items={t.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, t.id, file); updateTask(t.id, { attachments: [...(t.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateTask(t.id, { attachments: (t.attachments || []).filter((a) => a.path !== att.path) }); }} /></div>
                                   </div>
                                   <textarea value={t.details || ""} onChange={(e) => updateTask(t.id, { details: e.target.value })} rows={3}
                                     placeholder="Add notes or comments…"
@@ -805,6 +828,10 @@
                                       <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
                                       <FolderSelect value={t.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateTask(t.id, { folder: v })} />
                                     </div>
+                                    <div className="flex items-start gap-2">
+                                      <span className="text-[11px] pt-1" style={{ color: "#b89a93" }}>Files</span>
+                                      <div className="flex-1"><Attachments items={t.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, t.id, file); updateTask(t.id, { attachments: [...(t.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateTask(t.id, { attachments: (t.attachments || []).filter((a) => a.path !== att.path) }); }} /></div>
+                                    </div>
                                     <textarea value={t.details || ""} onChange={(e) => updateTask(t.id, { details: e.target.value })} rows={3} placeholder="Add notes or comments…" className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed" style={{ background: "#fffdf8", border: "1px solid #e5d8c5", color: "#3a2420", fontFamily: "'Newsreader', serif" }} />
                                   </div>
                                 )}
@@ -815,14 +842,19 @@
                           <h2 style={{ fontFamily: "'Fraunces', serif", color: "#3a2420" }} className="text-sm font-semibold mt-4 mb-1.5 flex items-center gap-2"><span style={{ color: "#5a7bb0" }}>●</span> Events</h2>
                           {fEvents.length === 0 && <p className="text-xs italic" style={{ color: "#c9b8af" }}>No events in this folder.</p>}
                           {fEvents.map((e) => (
-                            <div key={e.id} className="flex items-center gap-2 py-1.5 border-b" style={{ borderColor: "#f0e7d8" }}>
-                              <span>{e.emoji}</span>
-                              <div className="flex-1">
-                                <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
-                                <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{shortDate(e.startDate)}{eventTimeLabel(e) ? " · " + eventTimeLabel(e) : ""}</div>
+                            <div key={e.id} className="border-b py-1.5" style={{ borderColor: "#f0e7d8" }}>
+                              <div className="flex items-center gap-2">
+                                <span>{e.emoji}</span>
+                                <div className="flex-1">
+                                  <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}</div>
+                                  <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{shortDate(e.startDate)}{eventTimeLabel(e) ? " · " + eventTimeLabel(e) : ""}</div>
+                                </div>
+                                <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(e._key, e.id, { folder: v })} />
+                                <button onClick={() => delEvent(e._key, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
                               </div>
-                              <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(e._key, e.id, { folder: v })} />
-                              <button onClick={() => delEvent(e._key, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none">×</button>
+                              <div className="pl-6 mt-1">
+                                <Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(e._key, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(e._key, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} />
+                              </div>
                             </div>
                           ))}
                         </>
@@ -965,6 +997,33 @@
               <button disabled={busy} onClick={() => go("up")} className="w-full text-sm rounded-md py-2 font-semibold" style={{ background: "#f1e8da", color: "#7c2d24", opacity: busy ? 0.6 : 1 }}>Create account</button>
             </div>
           </div>
+        </div>
+      );
+    }
+
+    function Attachments({ items, onAdd, onRemove }) {
+      const [busy, setBusy] = useState(false);
+      const list = items || [];
+      const pick = async (e) => {
+        const file = e.target.files[0]; e.target.value = "";
+        if (!file) return;
+        setBusy(true);
+        try { await onAdd(file); }
+        catch (err) { window.alert("Upload failed: " + ((err && (err.message || err.code)) || "error")); }
+        finally { setBusy(false); }
+      };
+      return (
+        <div className="space-y-1">
+          {list.map((a) => (
+            <div key={a.path} className="flex items-center gap-2 text-[12px]">
+              <a href={a.url} target="_blank" rel="noopener noreferrer" className="truncate flex-1" style={{ color: "#7c2d24", textDecoration: "underline" }}>📎 {a.name}</a>
+              <button onClick={() => onRemove(a)} style={{ color: "#c9b0a8" }} className="text-base leading-none">×</button>
+            </div>
+          ))}
+          <label className="inline-block text-[11px] rounded-md px-2 py-1 cursor-pointer" style={{ background: "#f1e8da", color: "#7c2d24" }}>
+            {busy ? "Uploading…" : "📎 Add file"}
+            <input type="file" onChange={pick} className="hidden" disabled={busy} />
+          </label>
         </div>
       );
     }
