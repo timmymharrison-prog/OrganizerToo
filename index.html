@@ -22,7 +22,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
     import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
-    import { getFirestore, initializeFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+    import { getFirestore, initializeFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyC21uDcMLyGso3kLqBYimTL8loUi5zzLjw",
@@ -45,6 +45,7 @@
       signOut: () => signOut(auth),
       loadData: async (uid) => { const snap = await getDoc(doc(db, "users", uid)); return snap.exists() ? snap.data() : null; },
       saveData: (uid, data) => setDoc(doc(db, "users", uid), data),
+      subscribe: (uid, cb) => onSnapshot(doc(db, "users", uid), (snap) => cb(snap.exists() ? snap.data() : null)),
     };
     window.dispatchEvent(new Event("fb-ready"));
   </script>
@@ -90,6 +91,11 @@
       { id: "notes", label: "Notes", color: "#f2c6a0" },
     ];
     const FOLDER_COLORS = ["#e8a7a0", "#f3d98b", "#a9c8e8", "#c9b6e4", "#f2c6a0", "#a9d6c4", "#d3b8a3", "#b6c98a"];
+    const stableStringify = (v) => {
+      if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+      if (v && typeof v === "object") return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + stableStringify(v[k])).join(",") + "}";
+      return JSON.stringify(v);
+    };
 
     const SEED_EVENTS = {
       "2026-06-06": [{ id: 1, title: "Tina's birthday", emoji: "🎁" }],
@@ -121,6 +127,7 @@
       const [authReady, setAuthReady] = useState(false);
       const [cloudLoaded, setCloudLoaded] = useState(false);
       const [saveState, setSaveState] = useState("");
+      const lastJsonRef = useRef("");
       const [view, setView] = useState("month");
       const [cursor, setCursor] = useState({ y: today.getFullYear(), m: today.getMonth() });
       const [selected, setSelected] = useState(keyOf(today.getFullYear(), today.getMonth(), today.getDate()));
@@ -175,34 +182,47 @@
         return () => { if (unsub) unsub(); };
       }, []);
 
-      // load this user's data from the cloud when they log in
+      // live connection: apply this user's data in real time, on any browser
       useEffect(() => {
         if (!user || !window.fb) return;
-        let cancelled = false;
-        (async () => {
-          try {
-            const data = await window.fb.loadData(user.uid);
-            if (cancelled) return;
-            if (data) {
-              if (data.events && typeof data.events === "object" && !Array.isArray(data.events)) setEvents(data.events);
-              if (Array.isArray(data.tasks)) setTasks(data.tasks);
-              if (Array.isArray(data.notes)) setNotes(data.notes);
-              if (Array.isArray(data.folders)) setFolders(data.folders);
-            } else {
-              await window.fb.saveData(user.uid, { events, tasks, notes, folders });
+        const unsub = window.fb.subscribe(user.uid, (data) => {
+          if (data) {
+            const incoming = {
+              events: (data.events && typeof data.events === "object" && !Array.isArray(data.events)) ? data.events : {},
+              tasks: Array.isArray(data.tasks) ? data.tasks : [],
+              notes: Array.isArray(data.notes) ? data.notes : [],
+              folders: Array.isArray(data.folders) ? data.folders : [],
+            };
+            const json = stableStringify(incoming);
+            if (json !== lastJsonRef.current) {
+              lastJsonRef.current = json;
+              setEvents(incoming.events);
+              setTasks(incoming.tasks);
+              setNotes(incoming.notes);
+              setFolders(incoming.folders);
             }
             setCloudLoaded(true);
-          } catch (e) { console.error(e); setCloudLoaded(true); }
-        })();
-        return () => { cancelled = true; };
+          } else {
+            // brand-new account: seed the cloud with whatever is here now
+            const payload = { events, tasks, notes, folders };
+            lastJsonRef.current = stableStringify(payload);
+            window.fb.saveData(user.uid, payload).catch((e) => console.error(e));
+            setCloudLoaded(true);
+          }
+        });
+        return () => unsub && unsub();
       }, [user]);
 
-      // save to the cloud whenever data changes (after the initial load)
+      // save to the cloud whenever YOUR data changes (skips echoes from the live feed)
       useEffect(() => {
         if (!cloudLoaded || !user || !window.fb) return;
+        const payload = { events, tasks, notes, folders };
+        const json = stableStringify(payload);
+        if (json === lastJsonRef.current) return;
         setSaveState("saving");
         const t = setTimeout(() => {
-          window.fb.saveData(user.uid, { events, tasks, notes, folders })
+          lastJsonRef.current = json;
+          window.fb.saveData(user.uid, payload)
             .then(() => setSaveState("saved"))
             .catch((e) => { console.error(e); setSaveState("error:" + ((e && (e.message || e.code)) || "unknown")); });
         }, 800);
