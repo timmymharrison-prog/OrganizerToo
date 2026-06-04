@@ -22,7 +22,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
     import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
-    import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+    import { getFirestore, initializeFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyC21uDcMLyGso3kLqBYimTL8loUi5zzLjw",
@@ -36,7 +36,7 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);
+    const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
 
     window.fb = {
       onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb),
@@ -120,6 +120,7 @@
       const [user, setUser] = useState(null);
       const [authReady, setAuthReady] = useState(false);
       const [cloudLoaded, setCloudLoaded] = useState(false);
+      const [saveState, setSaveState] = useState("");
       const [view, setView] = useState("month");
       const [cursor, setCursor] = useState({ y: today.getFullYear(), m: today.getMonth() });
       const [selected, setSelected] = useState(keyOf(today.getFullYear(), today.getMonth(), today.getDate()));
@@ -199,8 +200,11 @@
       // save to the cloud whenever data changes (after the initial load)
       useEffect(() => {
         if (!cloudLoaded || !user || !window.fb) return;
+        setSaveState("saving");
         const t = setTimeout(() => {
-          window.fb.saveData(user.uid, { events, tasks, notes, folders }).catch((e) => console.error(e));
+          window.fb.saveData(user.uid, { events, tasks, notes, folders })
+            .then(() => setSaveState("saved"))
+            .catch((e) => { console.error(e); setSaveState("error:" + ((e && (e.message || e.code)) || "unknown")); });
         }, 800);
         return () => clearTimeout(t);
       }, [events, tasks, notes, folders, cloudLoaded, user]);
@@ -363,9 +367,13 @@
       return (
         <div style={{ fontFamily: "'Newsreader', Georgia, serif" }}
           className="min-h-screen w-full flex items-center justify-center p-4">
-          <button onClick={() => window.fb.signOut()}
-            className="fixed top-3 right-3 z-50 text-xs rounded-md px-3 py-1.5"
-            style={{ background: "#7c2d24", color: "#fff" }}>Sign out</button>
+          <div className="fixed top-3 right-3 z-50 flex items-center gap-2">
+            {saveState === "saving" && <span className="text-[11px]" style={{ color: "#9c8a82" }}>Saving…</span>}
+            {saveState === "saved" && <span className="text-[11px]" style={{ color: "#5a7d3a" }}>Saved ✓</span>}
+            {saveState.startsWith("error") && <span className="text-[11px] cursor-help" title={saveState.slice(6)} style={{ color: "#b3261e" }}>Save failed ⚠</span>}
+            <button onClick={() => window.fb.signOut()}
+              className="text-xs rounded-md px-3 py-1.5" style={{ background: "#7c2d24", color: "#fff" }}>Sign out</button>
+          </div>
 
           <div className="w-full max-w-2xl rounded-[28px] p-3 shadow-2xl"
             style={{ background: "linear-gradient(145deg,#7c2d24,#5e201a)" }}>
@@ -398,24 +406,33 @@
                           const ev = eventsFor(k), tk = tasksFor(k);
                           const isToday = k === todayKey;
                           const isSel = k === selected;
+                          const items = [
+                            ...ev.map((e) => ({ key: "e" + e.id, kind: "event", title: e.title, emoji: e.emoji, time: e.startTime })),
+                            ...[...tk].sort(byTime).map((t) => ({ key: "t" + t.id, kind: "task", title: t.title, done: t.done, time: t.time })),
+                          ];
+                          const shown = items.slice(0, 2);
+                          const more = items.length - shown.length;
                           return (
                             <button key={i} onClick={() => { setSelected(k); setView("day"); }}
-                              className="h-[104px] p-1.5 text-left relative transition"
+                              className="h-[104px] p-1.5 text-left align-top transition overflow-hidden"
                               style={{ background: isSel ? "#f4e7da" : "#fffdf8" }}>
                               <span className="inline-flex items-center justify-center w-6 h-6 text-sm rounded-full"
                                 style={isToday ? { background: "#7c2d24", color: "#fff", fontWeight: 700 } : { color: "#3a2420" }}>
                                 {d}
                               </span>
-                              {ev.slice(0, 1).map((e) => (
-                                <div key={e.id} className="mt-0.5 text-[10px] truncate px-1 rounded"
-                                  style={{ background: "#dfe6f0", color: "#3a4a63" }}>{e.emoji} {e.title}</div>
+                              {shown.map((it) => (
+                                it.kind === "event" ? (
+                                  <div key={it.key} className="mt-0.5 text-[10px] leading-tight truncate px-1 rounded"
+                                    style={{ background: "#dfe6f0", color: "#3a4a63" }}>{it.emoji} {it.title}</div>
+                                ) : (
+                                  <div key={it.key} className="mt-0.5 text-[10px] leading-tight truncate flex items-center gap-1"
+                                    style={{ color: "#3a2420", textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.5 : 1 }}>
+                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#c9a227" }} />
+                                    <span className="truncate">{it.title}</span>
+                                  </div>
+                                )
                               ))}
-                              {(tk.length > 0 || ev.length > 1) && (
-                                <div className="absolute bottom-1 left-1 flex gap-1">
-                                  {tk.length > 0 && <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#c9a227" }} />}
-                                  {ev.length > 1 && <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#5a7bb0" }} />}
-                                </div>
-                              )}
+                              {more > 0 && <div className="mt-0.5 text-[9px]" style={{ color: "#b89a93" }}>+{more} more</div>}
                             </button>
                           );
                         })}
