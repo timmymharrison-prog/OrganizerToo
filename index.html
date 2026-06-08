@@ -292,6 +292,18 @@
 
       const tasksFor = (k) => (Array.isArray(tasks) ? tasks : []).filter((t) => t.date === k);
       const eventsFor = (k) => (events && events[k]) || [];
+      const eventsOnDay = (k) => {
+        const out = [];
+        for (const startKey of Object.keys(events || {})) {
+          const arr = Array.isArray(events[startKey]) ? events[startKey] : [];
+          for (const e of arr) {
+            const s = e.startDate || startKey;
+            const en = e.endDate || s;
+            if (s <= k && k <= en) out.push({ ...e, _key: startKey, _cont: s !== k });
+          }
+        }
+        return out;
+      };
       const todayKey = keyOf(today.getFullYear(), today.getMonth(), today.getDate());
 
       const addItem = () => {
@@ -409,7 +421,7 @@
         return `${a} → ${b}`;
       };
 
-      const selDayCount = tasksFor(selected).length + eventsFor(selected).length;
+      const selDayCount = tasksFor(selected).length + eventsOnDay(selected).length;
 
       if (!authReady) return <Splash message="Starting up…" />;
       if (!user) return <LoginScreen />;
@@ -477,11 +489,11 @@
                         {cells.map((d, i) => {
                           if (!d) return <div key={i} style={{ background: "#f6f0e6" }} className="h-[104px]" />;
                           const k = keyOf(cursor.y, cursor.m, d);
-                          const ev = eventsFor(k), tk = tasksFor(k);
+                          const ev = eventsOnDay(k), tk = tasksFor(k);
                           const isToday = k === todayKey;
                           const isSel = k === selected;
                           const items = [
-                            ...ev.map((e) => ({ key: "e" + e.id, kind: "event", title: e.title, emoji: e.emoji, time: e.startTime })),
+                            ...ev.map((e) => ({ key: "e" + e.id, kind: "event", title: e.title, emoji: e.emoji, time: e.startTime, cont: e._cont })),
                             ...[...tk].sort(byTime).map((t) => ({ key: "t" + t.id, kind: "task", title: t.title, done: t.done, time: t.time })),
                           ];
                           const single = items.length === 1;
@@ -500,7 +512,7 @@
                                 {shown.map((it) => (
                                   it.kind === "event" ? (
                                     <div key={it.key} className={"text-[10px] leading-tight px-1 rounded " + (single ? "break-words" : "truncate")}
-                                      style={{ background: "#dfe6f0", color: "#3a4a63" }}>{it.emoji && it.emoji !== "📌" ? it.emoji + " " : ""}{it.title}</div>
+                                      style={{ background: "#dfe6f0", color: "#3a4a63" }}>{it.cont ? <span style={{ fontStyle: "italic", opacity: 0.7 }}>continued </span> : (it.emoji && it.emoji !== "📌" ? it.emoji + " " : "")}{it.title}</div>
                                   ) : (
                                     <div key={it.key} className="text-[10px] leading-tight flex items-start gap-1"
                                       style={{ color: "#3a2420", textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.5 : 1 }}>
@@ -589,7 +601,7 @@
                         {weekKeys.map((k) => {
                           const [yy, mm, dd] = k.split("-").map(Number);
                           const dt = new Date(yy, mm - 1, dd);
-                          const ev = eventsFor(k), tk = tasksFor(k);
+                          const ev = eventsOnDay(k), tk = tasksFor(k);
                           const isToday = k === todayKey;
                           const isSel = k === selected;
                           return (
@@ -610,7 +622,7 @@
                               )}
                               {ev.map((e) => (
                                 <div key={e.id} className="ml-8 mb-0.5 text-[11px] truncate px-1.5 py-0.5 rounded inline-block"
-                                  style={{ background: "#dfe6f0", color: "#3a4a63" }}>{e.startTime ? fmtTime(e.startTime) + " " : ""}{e.emoji} {e.title}</div>
+                                  style={{ background: "#dfe6f0", color: "#3a4a63" }}>{e._cont ? "continued " : (e.startTime ? fmtTime(e.startTime) + " " : "")}{e.title}</div>
                               ))}
                               {[...tk].sort(byTime).map((t) => (
                                 <div key={t.id} className="ml-8 flex items-center gap-1.5 text-[12px] py-0.5">
@@ -636,7 +648,7 @@
                   {view === "day" && (() => {
                     const [yy, mm, dd] = selected.split("-").map(Number);
                     const dt = new Date(yy, mm - 1, dd);
-                    const ev = eventsFor(selected), tk = tasksFor(selected);
+                    const ev = eventsOnDay(selected), tk = tasksFor(selected);
                     const done = tk.filter((t) => t.done).length;
                     const isToday = selected === todayKey;
                     return (
@@ -671,31 +683,31 @@
                               <div className="flex items-center gap-2">
                                 <span>{e.emoji && e.emoji !== "📌" ? e.emoji : ""}</span>
                                 <div className="flex-1 cursor-pointer" onClick={() => setExpandedEvent(open ? null : e.id)}>
-                                  <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}{e.details ? " ✎" : ""}</div>
+                                  <div className="text-sm" style={{ color: "#3a2420" }}>{e._cont && <span style={{ fontStyle: "italic", opacity: 0.7 }}>continued </span>}{e.title}{e.details ? " ✎" : ""}</div>
                                   {eventTimeLabel(e) && <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{eventTimeLabel(e)}</div>}
                                 </div>
                                 <span onClick={() => setExpandedEvent(open ? null : e.id)} className="cursor-pointer text-xs shrink-0 select-none" style={{ color: "#c4b3aa" }}>{open ? "▾" : "▸"}</span>
-                                <button onClick={() => delEvent(selected, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none shrink-0">×</button>
+                                <button onClick={() => delEvent(e._key, e.id)} style={{ color: "#c9b0a8" }} className="text-lg leading-none shrink-0">×</button>
                               </div>
                               {open && (
                                 <div className="pl-6 pt-2 space-y-2">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className="text-[11px]" style={{ color: "#b89a93" }}>Start</span>
-                                    <input type="date" value={e.startDate || selected} onChange={(ev2) => editEvent(selected, e.id, { startDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
-                                    <input type="time" value={e.startTime || ""} onChange={(ev2) => updateEvent(selected, e.id, { startTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="date" value={e.startDate || selected} onChange={(ev2) => editEvent(e._key, e.id, { startDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="time" value={e.startTime || ""} onChange={(ev2) => updateEvent(e._key, e.id, { startTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
                                     <span className="text-[11px]" style={{ color: "#b89a93" }}>End</span>
-                                    <input type="date" value={e.endDate || e.startDate || selected} onChange={(ev2) => updateEvent(selected, e.id, { endDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
-                                    <input type="time" value={e.endTime || ""} onChange={(ev2) => updateEvent(selected, e.id, { endTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="date" value={e.endDate || e.startDate || selected} onChange={(ev2) => updateEvent(e._key, e.id, { endDate: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
+                                    <input type="time" value={e.endTime || ""} onChange={(ev2) => updateEvent(e._key, e.id, { endTime: ev2.target.value })} className="text-sm rounded-md px-2 py-1.5 outline-none" style={{ background: "#fff", border: "1px solid #e5d8c5", color: "#3a2420" }} />
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <span className="text-[11px]" style={{ color: "#b89a93" }}>Folder</span>
-                                    <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(selected, e.id, { folder: v })} />
+                                    <FolderSelect value={e.folder} folders={folders} onCreate={addFolder} onChange={(v) => updateEvent(e._key, e.id, { folder: v })} />
                                   </div>
                                   <div className="flex items-start gap-2">
                                     <span className="text-[11px] pt-1" style={{ color: "#b89a93" }}>Files</span>
-                                    <div className="flex-1"><Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(selected, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(selected, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} /></div>
+                                    <div className="flex-1"><Attachments items={e.attachments} onAdd={async (file) => { const att = await window.fb.uploadFile(user.uid, e.id, file); updateEvent(e._key, e.id, { attachments: [...(e.attachments || []), att] }); }} onRemove={async (att) => { try { await window.fb.deleteFile(att.path); } catch (e2) {} updateEvent(e._key, e.id, { attachments: (e.attachments || []).filter((a) => a.path !== att.path) }); }} /></div>
                                   </div>
-                                  <textarea value={e.details || ""} onChange={(ev2) => updateEvent(selected, e.id, { details: ev2.target.value })} rows={3} placeholder="Add notes or details…" className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed" style={{ background: "#fffdf8", border: "1px solid #e5d8c5", color: "#3a2420", fontFamily: "'Newsreader', serif" }} />
+                                  <textarea value={e.details || ""} onChange={(ev2) => updateEvent(e._key, e.id, { details: ev2.target.value })} rows={3} placeholder="Add notes or details…" className="w-full resize-none text-sm rounded-md px-3 py-2 outline-none leading-relaxed" style={{ background: "#fffdf8", border: "1px solid #e5d8c5", color: "#3a2420", fontFamily: "'Newsreader', serif" }} />
                                   <button onClick={() => setExpandedEvent(null)} className="text-sm rounded-md px-4 py-1.5 font-semibold" style={{ background: "#7c2d24", color: "#fff" }}>Save</button>
                                 </div>
                               )}
@@ -834,7 +846,7 @@
                                 {cellsM.map((d, i) => {
                                   if (!d) return <div key={i} className="h-[14px]" />;
                                   const k = keyOf(cursor.y, m, d);
-                                  const has = eventsFor(k).length > 0 || tasksFor(k).length > 0;
+                                  const has = eventsOnDay(k).length > 0 || tasksFor(k).length > 0;
                                   const isToday = k === todayKey;
                                   return (
                                     <div key={i} className="flex justify-center">
