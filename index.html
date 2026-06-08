@@ -242,6 +242,14 @@
       const [flash, setFlash] = useState("");
       const [expandedTask, setExpandedTask] = useState(null);
       const [expandedEvent, setExpandedEvent] = useState(null);
+      const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches);
+      const [menuOpen, setMenuOpen] = useState(false);
+      useEffect(() => {
+        const mq = window.matchMedia("(max-width: 640px)");
+        const handler = (e) => setIsMobile(e.matches);
+        if (mq.addEventListener) mq.addEventListener("change", handler); else mq.addListener(handler);
+        return () => { if (mq.removeEventListener) mq.removeEventListener("change", handler); else mq.removeListener(handler); };
+      }, []);
 
       const firstDow = new Date(cursor.y, cursor.m, 1).getDay();
       const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
@@ -297,7 +305,7 @@
           const startTime = newTime || "";
           const endDate = newEndDate || startDate;
           const endTime = newEndTime || "";
-          setEvents((p) => ({ ...p, [startDate]: [...(p[startDate] || []), { id: Date.now(), title: text, emoji: "📌", startDate, startTime, endDate, endTime, folder: newFolder || "" }] }));
+          setEvents((p) => ({ ...p, [startDate]: [...(p[startDate] || []), { id: Date.now(), title: text, emoji: "", startDate, startTime, endDate, endTime, folder: newFolder || "" }] }));
         }
         setNewItem(""); setNewTime(""); setNewDate(""); setNewEndDate(""); setNewEndTime(""); setNewFolder("");
       };
@@ -409,7 +417,7 @@
 
       return (
         <div style={{ fontFamily: "'Newsreader', Georgia, serif" }}
-          className="min-h-screen w-full flex items-center justify-center p-4">
+          className={"min-h-screen w-full flex justify-center " + (isMobile ? "items-start" : "items-center p-4")}>
           <div className="fixed top-3 right-3 z-50 flex items-center gap-2">
             {saveState === "saving" && <span className="text-[11px]" style={{ color: "#9c8a82" }}>Saving…</span>}
             {saveState === "saved" && <span className="text-[11px]" style={{ color: "#5a7d3a" }}>Saved ✓</span>}
@@ -418,12 +426,35 @@
               className="text-xs rounded-md px-3 py-1.5" style={{ background: "#7c2d24", color: "#fff" }}>Sign out</button>
           </div>
 
-          <div className="w-full max-w-2xl rounded-[28px] p-3 shadow-2xl"
-            style={{ background: "linear-gradient(145deg,#7c2d24,#5e201a)" }}>
+          <div className={isMobile ? "w-full" : "w-full max-w-2xl rounded-[28px] p-3 shadow-2xl"}
+            style={isMobile ? { background: "#fbf7f0", border: "1px solid #7c2d24", minHeight: "100vh" } : { background: "linear-gradient(145deg,#7c2d24,#5e201a)" }}>
             <div className="flex">
-              <div className="flex-1 rounded-l-2xl rounded-r-md overflow-hidden"
-                style={{ background: "#fbf7f0", boxShadow: "inset 0 0 30px rgba(120,45,36,0.06)" }}>
-                <div className="p-7 min-h-[760px]">
+              <div className={"flex-1 overflow-hidden " + (isMobile ? "" : "rounded-l-2xl rounded-r-md")}
+                style={{ background: "#fbf7f0", boxShadow: isMobile ? "none" : "inset 0 0 30px rgba(120,45,36,0.06)" }}>
+                <div className={isMobile ? "p-2 min-h-[760px]" : "p-7 min-h-[760px]"}>
+
+                  {/* mobile view menu */}
+                  {isMobile && (
+                    <div className="mb-4 relative">
+                      <button onClick={() => setMenuOpen((o) => !o)}
+                        className="flex items-center gap-2 text-sm rounded-md px-3 py-2 font-semibold"
+                        style={{ background: "#7c2d24", color: "#fff" }}>
+                        <span style={{ fontSize: "15px" }}>☰</span> {(TABS.find((t) => t.id === view) || {}).label || "Menu"}
+                      </button>
+                      {menuOpen && (
+                        <div className="absolute z-40 mt-1 rounded-lg shadow-xl overflow-hidden" style={{ background: "#fff", border: "1px solid #e5d8c5", minWidth: "160px" }}>
+                          {TABS.map((t) => (
+                            <button key={t.id} onClick={() => { setView(t.id); setMenuOpen(false); }}
+                              className="flex items-center gap-2 w-full text-left px-4 py-2.5 text-sm"
+                              style={{ background: view === t.id ? "#f4e7da" : "#fff", color: "#3a2420", fontWeight: view === t.id ? 600 : 400 }}>
+                              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: t.color === "#ffffff" ? "#d8cbb8" : t.color }} />
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* ===== MONTH VIEW ===== */}
                   {view === "month" && (
@@ -453,29 +484,33 @@
                             ...ev.map((e) => ({ key: "e" + e.id, kind: "event", title: e.title, emoji: e.emoji, time: e.startTime })),
                             ...[...tk].sort(byTime).map((t) => ({ key: "t" + t.id, kind: "task", title: t.title, done: t.done, time: t.time })),
                           ];
-                          const shown = items.slice(0, 2);
+                          const single = items.length === 1;
+                          const shown = single ? items : items.slice(0, 2);
                           const more = items.length - shown.length;
                           return (
                             <button key={i} onClick={() => { setSelected(k); setView("day"); }}
-                              className="h-[104px] p-1.5 text-left align-top transition overflow-hidden"
+                              className="h-[104px] p-1 flex flex-col items-start text-left transition overflow-hidden"
                               style={{ background: isSel ? "#f4e7da" : "#fffdf8" }}>
-                              <span className="inline-flex items-center justify-center w-6 h-6 text-sm rounded-full"
-                                style={isToday ? { background: "#7c2d24", color: "#fff", fontWeight: 700 } : { color: "#3a2420" }}>
-                                {d}
-                              </span>
-                              {shown.map((it) => (
-                                it.kind === "event" ? (
-                                  <div key={it.key} className="mt-0.5 text-[10px] leading-tight truncate px-1 rounded"
-                                    style={{ background: "#dfe6f0", color: "#3a4a63" }}>{it.emoji} {it.title}</div>
-                                ) : (
-                                  <div key={it.key} className="mt-0.5 text-[10px] leading-tight truncate flex items-center gap-1"
-                                    style={{ color: "#3a2420", textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.5 : 1 }}>
-                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#c9a227" }} />
-                                    <span className="truncate">{it.title}</span>
-                                  </div>
-                                )
-                              ))}
-                              {more > 0 && <div className="mt-0.5 text-[9px]" style={{ color: "#b89a93" }}>+{more} more</div>}
+                              {isToday ? (
+                                <span className="inline-flex items-center justify-center w-5 h-5 text-xs rounded-full" style={{ background: "#7c2d24", color: "#fff", fontWeight: 700 }}>{d}</span>
+                              ) : (
+                                <span className="text-xs" style={{ color: "#3a2420", fontWeight: 600 }}>{d}</span>
+                              )}
+                              <div className="mt-0.5 space-y-0.5">
+                                {shown.map((it) => (
+                                  it.kind === "event" ? (
+                                    <div key={it.key} className={"text-[10px] leading-tight px-1 rounded " + (single ? "break-words" : "truncate")}
+                                      style={{ background: "#dfe6f0", color: "#3a4a63" }}>{it.emoji && it.emoji !== "📌" ? it.emoji + " " : ""}{it.title}</div>
+                                  ) : (
+                                    <div key={it.key} className="text-[10px] leading-tight flex items-start gap-1"
+                                      style={{ color: "#3a2420", textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.5 : 1 }}>
+                                      <span className="w-1.5 h-1.5 rounded-full shrink-0 mt-1" style={{ background: "#c9a227" }} />
+                                      <span className={single ? "break-words" : "truncate"}>{it.title}</span>
+                                    </div>
+                                  )
+                                ))}
+                                {more > 0 && <div className="text-[9px]" style={{ color: "#b89a93" }}>+{more} more</div>}
+                              </div>
                             </button>
                           );
                         })}
@@ -634,7 +669,7 @@
                           return (
                             <div key={e.id} className="border-b py-1.5" style={{ borderColor: "#f0e7d8" }}>
                               <div className="flex items-center gap-2">
-                                <span>{e.emoji}</span>
+                                <span>{e.emoji && e.emoji !== "📌" ? e.emoji : ""}</span>
                                 <div className="flex-1 cursor-pointer" onClick={() => setExpandedEvent(open ? null : e.id)}>
                                   <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}{e.details ? " ✎" : ""}</div>
                                   {eventTimeLabel(e) && <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{eventTimeLabel(e)}</div>}
@@ -881,7 +916,7 @@
                             return (
                             <div key={e.id} className="border-b py-1.5" style={{ borderColor: "#f0e7d8" }}>
                               <div className="flex items-center gap-2">
-                                <span>{e.emoji}</span>
+                                <span>{e.emoji && e.emoji !== "📌" ? e.emoji : ""}</span>
                                 <div className="flex-1 cursor-pointer" onClick={() => setExpandedEvent(open ? null : e.id)}>
                                   <div className="text-sm" style={{ color: "#3a2420" }}>{e.title}{e.details ? " ✎" : ""}</div>
                                   <div className="text-[11px]" style={{ color: "#5a7bb0", fontWeight: 600 }}>{shortDate(e.startDate)}{eventTimeLabel(e) ? " · " + eventTimeLabel(e) : ""}</div>
@@ -989,7 +1024,8 @@
                 </div>
               </div>
 
-              {/* tab rail */}
+              {/* tab rail (desktop only) */}
+              {!isMobile && (
               <div className="flex flex-col gap-1.5 pl-1 pt-6">
                 {TABS.map((t) => {
                   const active = view === t.id;
@@ -1009,6 +1045,7 @@
                   );
                 })}
               </div>
+              )}
             </div>
           </div>
         </div>
